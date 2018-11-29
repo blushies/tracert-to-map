@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>tracert to map</title>
+  <meta name="description" content="Converts tracert logs to points on a map.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAE9IwXxXsf4PeToqmi5Mn3qURDRTcaHZo&callback=initMap" async defer></script>
+  <style type="text/css">
+    * {
+      box-sizing: border-box;
+    }
+    html, body, #main, #map {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+    }
+    #text, #highlight {
+      width: 100%;
+      height: 50%;
+      min-height: 20em;
+    }
+    #buttonContainer {
+      text-align: right;
+      padding: 1em;
+    }
+    #highlight {
+      position: absolute;
+      top: 0;
+      pointer-events: none;
+      padding: 3px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    mark {
+      background-color: #ffff007f;
+    }
+  </style>
+</head>
+
+<body>
+  <!--[if lte IE 9]>
+    <p>You are using an <strong>outdated</strong> browser. Please <a href="https://browsehappy.com/">upgrade your browser</a> to improve your experience and security.</p>
+  <![endif]-->
+  <noscript>
+    <p>Please enable javascript. 🐢 🚀 </p>
+  </noscript>
+  <div id="main">
+    <div id="highlight"></div>
+    <textarea id="text" placeholder="Paste tracert log here."></textarea>
+    <div id="buttonContainer">
+      <button type="button" id="submit">Convert</button>
+    </div>
+  </div>
+  <script type="text/javascript">
+    (() => {
+      const textarea = document.getElementById('text');
+      const highlight = document.getElementById('highlight');
+      const button = document.getElementById('submit');
+
+      const ipRegex = /\b(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\b/g;
+
+      let text;
+      textarea.addEventListener('input', e => {
+        text = e.target.value;
+
+        highlight.innerHTML = text
+          .replace(/\n$/g, '\n\n')
+          .replace(ipRegex, '<mark>$&</mark>')
+          ;
+      });
+
+      button.addEventListener('click', async () => {
+        if (!text) {
+          alert('Please enter a tracert log.');
+          return;
+        }
+        const match = text.match(ipRegex);
+        if (!text) {
+          alert('Couldn\'t find any IPs!');
+        }
+        const coords = await Promise.all(match.map(async ip => {
+          const res = await fetch(`http://ip-api.com/json/${ip}`);
+          const json = await res.json();
+          return { lat: json.lat, lon: json.lon };
+        }));
+        const url = new URL(window.location);
+        const encodedCoords = coords
+          .filter(({ lat, lon }) => lat && lon)
+          .map(({ lat, lon }) => `${lat},${lon}`)
+          .join('|')
+          ;
+        url.searchParams.set('coords', encodedCoords);
+        window.open(url.href);
+      });
+
+      // Resize highlight area to match text area.
+      new MutationObserver(mutations => {
+        highlight.style.width = textarea.style.width;
+        highlight.style.height = textarea.style.height;
+      }).observe(textarea, {
+        attributes: true,
+        attributeFilter: ['style'],
+      });
+
+      const queryParams = new URLSearchParams(window.location.search);
+      let coords = queryParams.get('coords');
+      if (!coords) {
+        return;
+      }
+      coords = coords
+        .split('|')
+        .map(coords => {
+          const [ lat, lng ] = coords.split(',');
+          return {
+            lat: Number.parseFloat(lat),
+            lng: Number.parseFloat(lng),
+          };
+        })
+        ;
+      if (coords.length < 2) {
+        return;
+      }
+
+      window.initMap = () => {
+        const main = document.getElementById('main');
+        main.innerHTML = '<div id="map"></div>';
+        const map = new google.maps.Map(document.getElementById('map'));
+
+        const lines = coords.reduce((acc, coords, i, arr) => {
+          if (!i) {
+            return acc;
+          }
+          const prevCoords = arr[i - 1];
+          acc.push(new google.maps.Polyline({
+            map,
+            path: [
+              prevCoords,
+              coords,
+            ],
+            geodesic: true,
+            strokeColor: '#FF0000',
+            strokeOpacity: 1.0,
+            strokeWeight: 2,
+          }));
+          return acc;
+        }, []);
+
+        coords = coords.reduce((acc, { lat, lng }, i) => {
+          const hash = ((lat + lng) * (lat + lng + 1) / 2) + lng;
+          let coords = acc.get(hash);
+          if (!coords) {
+            coords = {
+              lat,
+              lng,
+              occurrences: [],
+            };
+            acc.set(hash, coords);
+          }
+          coords.occurrences.push(i);
+          return acc;
+        }, new Map());
+        coords = Array.from(coords.values());
+
+        const markers = coords.map(({ lat, lng, occurrences }) => {
+          if (occurrences.length === 1) {
+            return new google.maps.Marker({
+              map,
+              label: String.fromCharCode(65 + occurrences[0]),
+              position: { lat, lng },
+            });
+          }
+          const infoWindow = new google.maps.InfoWindow({
+            content: `
+              <div>
+                ${occurrences.map(i => `
+                  <div><b>${String.fromCharCode(65 + i)}</b></div>
+                `).join('')}
+              </div>
+            `,
+          });
+          const marker = new google.maps.Marker({
+            map,
+            position: { lat, lng },
+          });
+          marker.addListener('click', () => {
+            infoWindow.open(map, marker);
+          });
+          infoWindow.open(map, marker);
+          return marker;
+        });
+
+        const bounds = new google.maps.LatLngBounds();
+        markers.forEach(marker => bounds.extend(marker.getPosition()));
+        map.setCenter(bounds.getCenter());
+        map.fitBounds(bounds);
+        google.maps.event.addListenerOnce(map, 'idle', () => {
+          if (map.getZoom() > 11) {
+            map.setZoom(11);
+          }
+        });
+      };
+    })();
+  </script>
+</body>
+</html>
