@@ -81,18 +81,42 @@
         if (!text) {
           alert('Couldn\'t find any IPs!');
         }
+        button.disabled = true;
+        const cache = new Map();
         const coords = await Promise.all(match.map(async ip => {
-          const res = await fetch(`http://ip-api.com/json/${ip}`);
+          const cached = cache.get(ip);
+          if (cached) {
+            return cached;
+          }
+          try {
+            const localCached = JSON.parse(localStorage.getItem(ip));
+            if (localCached) {
+              return localCached;
+            }
+          } catch (err) {}
+          cache.set(ip, 'pending');
+          const res = await fetch(`https://api.ipdata.co/${ip}?api-key=a92848d7d5016be515098ad31df0d7027a1a1b4a4e101d047ff67b13`);
           const json = await res.json();
-          return { lat: json.lat, lon: json.lon };
+          const coords = { lat: json.latitude, lon: json.longitude };
+          cache.set(ip, coords);
+          localStorage.setItem(ip, JSON.stringify(coords));
+          return coords;
         }));
         const url = new URL(window.location);
         const encodedCoords = coords
-          .filter(({ lat, lon }) => lat && lon)
+          .map((coords, i) => {
+            if (coords === 'pending') {
+              const ip = match[i];
+              return cache.get(ip);
+            }
+            return coords;
+          })
+          .filter(coords => coords && coords.lat && coords.lon)
           .map(({ lat, lon }) => `${lat},${lon}`)
           .join('|')
           ;
         url.searchParams.set('coords', encodedCoords);
+        button.disabled = false;
         window.open(url.href);
       });
 
