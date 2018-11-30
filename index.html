@@ -80,6 +80,7 @@
           var callback_name = options.callbackName || 'callback',
             on_success = options.onSuccess || function(){},
             on_timeout = options.onTimeout || function(){},
+            on_error = options.onError || function(){},
             timeout = options.timeout || 10; // sec
 
           var timeout_trigger = window.setTimeout(function(){
@@ -97,7 +98,13 @@
           script.async = true;
           script.src = src;
 
-          document.getElementsByTagName('head')[0].appendChild(script);
+          try {
+            document.getElementsByTagName('head')[0].appendChild(script);
+          }
+          catch (err) {
+            clearTimeout(timeout_trigger);
+            on_error(err);
+          }
         }
 
         return that;
@@ -109,6 +116,7 @@
           $jsonp.send(`${url}&callback=${callback}`, {
             callbackName: callback,
             onSuccess: resolve,
+            onError: reject,
             onTimeout: () => reject('timeout'),
           });
         }
@@ -140,11 +148,16 @@
             }
           } catch (err) {}
           cache.set(ip, 'pending');
-          const json = await jsonp(`https://api.ipdata.co/${ip}?api-key=a92848d7d5016be515098ad31df0d7027a1a1b4a4e101d047ff67b13`);
-          const coords = { lat: json.latitude, lon: json.longitude };
-          cache.set(ip, coords);
-          localStorage.setItem(ip, JSON.stringify(coords));
-          return coords;
+          try {
+            const json = await jsonp(`https://api.ipdata.co/${ip}?api-key=a92848d7d5016be515098ad31df0d7027a1a1b4a4e101d047ff67b13`);
+            const coords = { lat: json.latitude, lon: json.longitude };
+            cache.set(ip, coords);
+            localStorage.setItem(ip, JSON.stringify(coords));
+            return coords;
+          }
+          catch (err) {
+            console.warn(err);
+          }
         }));
         const url = new URL(window.location);
         const encodedCoords = coords
