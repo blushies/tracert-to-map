@@ -72,6 +72,51 @@
           ;
       });
 
+      // https://stackoverflow.com/a/13045312
+      var $jsonp = (function(){
+        var that = {};
+
+        that.send = function(src, options) {
+          var callback_name = options.callbackName || 'callback',
+            on_success = options.onSuccess || function(){},
+            on_timeout = options.onTimeout || function(){},
+            timeout = options.timeout || 10; // sec
+
+          var timeout_trigger = window.setTimeout(function(){
+            window[callback_name] = function(){};
+            on_timeout();
+          }, timeout * 1000);
+
+          window[callback_name] = function(data){
+            window.clearTimeout(timeout_trigger);
+            on_success(data);
+          }
+
+          var script = document.createElement('script');
+          script.type = 'text/javascript';
+          script.async = true;
+          script.src = src;
+
+          document.getElementsByTagName('head')[0].appendChild(script);
+        }
+
+        return that;
+      })();
+
+      const jsonp = url => new Promise((resolve, reject) => {
+        try {
+          const callback = `cb${(Math.random() * 100000000000000000000).toString(36)}`;
+          $jsonp.send(`${url}&callback=${callback}`, {
+            callbackName: callback,
+            onSuccess: resolve,
+            onTimeout: () => reject('timeout'),
+          });
+        }
+        catch (err) {
+          reject(err);
+        }
+      });
+
       button.addEventListener('click', async () => {
         if (!text) {
           alert('Please enter a tracert log.');
@@ -95,8 +140,7 @@
             }
           } catch (err) {}
           cache.set(ip, 'pending');
-          const res = await fetch(`https://api.ipdata.co/${ip}?api-key=a92848d7d5016be515098ad31df0d7027a1a1b4a4e101d047ff67b13`);
-          const json = await res.json();
+          const json = await jsonp(`https://api.ipdata.co/${ip}?api-key=a92848d7d5016be515098ad31df0d7027a1a1b4a4e101d047ff67b13`);
           const coords = { lat: json.latitude, lon: json.longitude };
           cache.set(ip, coords);
           localStorage.setItem(ip, JSON.stringify(coords));
